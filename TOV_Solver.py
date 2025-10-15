@@ -1,15 +1,4 @@
-"""tov_trainer.py
-
-Utility module to build, train, evaluate, save and load a WaveNet-like model
-for the TOV/ M(R) prediction task. Designed to be importable from scripts and
-notebooks. Keep functions small and testable.
-
-Example usage:
-    from tov_trainer import build_wavenet, train_from_csv, load_model, predict
-
-    model, history = train_from_csv(input_csv, output_csv, epochs=32)
-    model.save('models/my_trained.h5')
-
+"""
     python TOV_Solver.py --input dataframes/sample_eos.csv --output dataframes/sample_mr.csv
 """
 
@@ -21,7 +10,6 @@ from sklearn.model_selection import train_test_split
 import tensorflow as tf
 from tensorflow.keras import layers, models, regularizers, initializers
 from preprocessing import tov_load_and_preprocess
-import joblib
 
 def build_wavenet(input_length=32, input_channels=1, output_channels=2, filters=64):
     inp = layers.Input(shape=(input_length, input_channels))
