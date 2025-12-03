@@ -1,2 +1,4 @@
 /venv
 /__pycache__
+data/sample_eos.csv
+data/sample_mr.csv
