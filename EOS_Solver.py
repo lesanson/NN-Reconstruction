@@ -39,9 +39,9 @@ class EoSNetwork(nn.Module):
         super().__init__()
         self.act = nn.ELU()
 
-        self.conv1 = nn.Conv1d(input_channels, 64, 1)
-        self.conv2 = nn.Conv1d(64, 64, 1)
-        self.conv3 = nn.Conv1d(64, 64, 1)
+        self.conv1 = nn.Conv1d(input_channels, 128, 1)
+        self.conv2 = nn.Conv1d(128, 128, 1)
+        self.conv3 = nn.Conv1d(128, 64, 1)
         self.conv4 = nn.Conv1d(64, output_channels, 1)
 
         for m in [self.conv1, self.conv2, self.conv3, self.conv4]:
@@ -58,12 +58,8 @@ class EoSNetwork(nn.Module):
 
         # lift 1 -> 64 (no residual)
         x = self.act(self.conv1(x))
-
-        # residual block in 64-dim space
-        identity = x
-        y = self.act(self.conv2(x))
-        y = self.act(self.conv3(y))
-        x = identity + y
+        x = self.act(self.conv2(x))
+        x = self.act(self.conv3(x))
 
         # projection
         x = torch.sigmoid(self.conv4(x))
@@ -96,17 +92,24 @@ def chi2_loss(M_obs, R_obs, dM, dR):
     return loss
 
 
-
 def get_lr_schedule(epoch):
-    """Learning rate schedule from paper (Section 4)"""
-    if epoch < 500:
-        return 0.0005
-    elif epoch < 2000:
-        return 0.005
-    elif epoch < 3500:
-        return 0.005
+    # Warmup-ish / coarse search
+    if epoch < 200:
+        return 3e-3
+    # Still exploring, but smaller
+    elif epoch < 600:
+        return 1e-3
+    # Fine-tuning
+    elif epoch < 1200:
+        return 7.5e-4
+    # Very fine tuning
+    elif epoch < 20000:
+        return 7e-4
+    elif epoch < 30000:
+        return 6e-4
     else:
-        return 0.0005
+        return 5e-4
+
 
 # ---- 2. Training function ----
 def train_eos(
@@ -194,7 +197,7 @@ if __name__ == "__main__":
     parser.add_argument("--mr_csv", type=str, default="data/sample_mr.csv", help="Observed MR CSV")
     parser.add_argument("--eos_csv", type=str, default="data/sample_eos.csv", help="True EoS CSV for densities")
     parser.add_argument("--save", type=str, default="models/eos_solver.pt", help="Where to save EoS network weights")
-    parser.add_argument("--epochs", type=int, default=10000)
+    parser.add_argument("--epochs", type=int, default=20000)
     parser.add_argument("--lr", type=float, default=1e-2)
     parser.add_argument("--weight_decay", type=float, default=1e-8)
     parser.add_argument("--Np", type=int, default=32)

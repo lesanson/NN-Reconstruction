@@ -10,7 +10,6 @@ import os
 
 import numpy as np
 import pandas as pd
-from scipy.interpolate import PchipInterpolator, interp1d
 
 
 def _resample_group(df: pd.DataFrame, column: str, Np: int = 32) -> pd.DataFrame:
@@ -78,7 +77,6 @@ def _resample_group(df: pd.DataFrame, column: str, Np: int = 32) -> pd.DataFrame
         M = M[mask]
         R = R[mask]
 
-        # Nothing left?
         n_points = len(M)
         if n_points == 0:
             raise ValueError(f"No valid points for (ID {ID_val}, model {model_val}) after R <= 16 mask.")
@@ -213,33 +211,73 @@ def eos_load_and_preprocess(
     observed_mr = pd.read_csv(mr_csv)
     observed_eos = pd.read_csv(eos_csv)
 
-    # ---------------- M–R preprocessing (same as before) ----------------
-    M_MAX = observed_mr["M"].max()
+    # ---------------- global scaling constants (must match TOV training) ----------------
+    # These should be computed the same way as in tov_load_and_preprocess: ID != 19248
+    M_MAX = observed_mr.query("ID != 19248")["M"].max()
     R_MAX = 16.0
-    R_MIN = observed_mr["R"].min()
+    R_MIN = observed_mr.query("ID != 19248")["R"].min()
 
-    observed_mr = observed_mr.query("ID == 19248").query("model == 'RMFNL'")
-    M_targets = np.linspace(1.0, min(2.25, observed_mr["M"].max()), 11)
+    # ---------------- M–R for the "observed" curve (ID 19248, RMFNL) ----------------
+    mr_19248 = observed_mr.query("ID == 19248").query("model == 'RMFNL'")
 
-    M_values = observed_mr["M"].values
-    R_values = observed_mr["R"].values
+    # assume rows are ordered along the physical sequence (central density)
+    M_values = mr_19248["M"].values.astype(np.float32)
+    R_values = mr_19248["R"].values.astype(np.float32)
 
-    R_obs = np.array([R_values[np.argmin(np.abs(M_values - m))] for m in M_targets])
+    # --------- find R(M = 1) on the *stable* branch ---------
+    # stable branch: from start up to maximum mass
+    imax = np.argmax(M_values)                 # index of M_max
+    M_stable = M_values[:imax + 1]
+    R_stable = R_values[:imax + 1]
 
+    # interpolate R at M = 1 on the stable branch (this is your R_max_phys)
+    R_at_M1 = np.interp(1.0, M_stable, R_stable)
+
+    # --------- restrict to region with M >= 1.0 (stable + unstable if present) ---------
+    mask_M_ge_1 = M_values >= 1.0
+    M_ge1 = M_values[mask_M_ge_1]
+    R_ge1 = R_values[mask_M_ge_1]
+
+    # smallest radius that still has M >= 1.0
+    R_min_phys = R_ge1.min()
+
+    # we'll interpolate M as a function of R, so sort this subset by R
+    order_R = np.argsort(R_ge1)                # ascending R
+    R_ge1_sorted = R_ge1[order_R]
+    M_ge1_sorted = M_ge1[order_R]
+
+    # --------- choose 11 radii between R(M=1) and R_min_phys ---------
+    R_targets = np.linspace(
+        R_at_M1,       # "R_max" = radius at M = 1
+        R_min_phys,    # "R_min" = most compact star with M >= 1
+        11,
+        dtype=np.float32
+    )
+
+    # interpolate M(R) along this monotonic R-sorted branch
+    M_targets = np.interp(R_targets, R_ge1_sorted, M_ge1_sorted)
+
+    # these are your 11 observed points
+    R_obs = R_targets
+
+    # ---------------- scale to match TOV outputs ----------------
     M_scaled = M_targets / M_MAX
     R_scaled = (R_obs - R_MIN) / (R_MAX - R_MIN)
     dM = np.ones_like(M_scaled)
     dR = np.ones_like(R_scaled)
 
-    # ---------------- ρ-grid from observed_eos ----------------
-    eos_19248 = observed_eos.query("ID == 19248").query("model == 'RMFNL'").sort_values("rho")
+    # ---------------- ρ-grid from observed EoS ----------------
+    eos_19248 = (
+        observed_eos
+        .query("ID == 19248")
+        .query("model == 'RMFNL'")
+        .sort_values("rho")
+    )
 
     rho_phys = eos_19248["rho"].values.astype(np.float32)
     rho_min, rho_max = rho_phys.min(), rho_phys.max()
 
-    # 32 linearly spaced physical densities between rho_min and rho_max
     rho_phys_targets = np.linspace(rho_min, rho_max, Np, dtype=np.float32)
-
     rho_scaled = 0.1 * (rho_phys_targets - rho_min) / (rho_max - rho_min)
 
     print("M_scaled:", M_scaled)

@@ -34,12 +34,12 @@ class CausalConv1d(nn.Module):
 
     def forward(self, x):
         # Pad to keep causality
-        x = F.pad(x, (self.pad, 0), mode="replicate")
+        x = F.pad(x, (self.pad, 0))
         return self.conv(x)
 
 
 class WaveNetTOV(nn.Module):
-    def __init__(self, input_channels=1, output_channels=2, filters=32):
+    def __init__(self, input_channels=1, output_channels=2, filters=16):
         super(WaveNetTOV, self).__init__()
         self.elu = nn.ELU()
         self.sigmoid = nn.Sigmoid()
@@ -47,14 +47,14 @@ class WaveNetTOV(nn.Module):
         self.input_conv = CausalConv1d(input_channels, filters, kernel_size=2, dilation=1)
 
         # Hidden dilated layers
-        dilations = [1, 2, 4, 8, 16, 32, 16, 32]
+        dilations = [1, 2, 4, 8, 16, 32, 16, 8, 4, 8, 16, 32, 64]
         self.hidden_layers = nn.ModuleList([
             CausalConv1d(filters, filters, kernel_size=2, dilation=d)
             for d in dilations
         ])
 
         # Output layer
-        self.output_conv = CausalConv1d(filters, output_channels, kernel_size=2, dilation=64)
+        self.output_conv = CausalConv1d(filters, output_channels, kernel_size=2, dilation=128)
 
         self._init_weights()
 
@@ -117,7 +117,7 @@ def train_model(model, X, Y, epochs=3000, batch_size=256, lr=1e-5, save_dir='mod
         train_loss = 0.0
         n_batches = 0
 
-        # iterate over mini-batches
+        # iterate over batches
         for i in range(0, X_train.size(0), batch_size):
             idx = perm[i:i+batch_size]
             batch_x, batch_y = X_train[idx], y_train[idx]
@@ -185,9 +185,9 @@ def evaluate_model(model, X_test, y_test, device=None):
     with torch.no_grad():
         pred = model(X_test)
         mse_loss = nn.MSELoss()(pred, y_test).item()
-        mae_loss = torch.mean(torch.abs(pred - y_test)).item()
+        r2 = r2_score(y_test, pred).item()
 
-    metrics = {"MSE": mse_loss, "MAE": mae_loss}
+    metrics = {"MSE": mse_loss, "R2": r2}
     preds = pred.cpu().numpy()
     return metrics, preds
 
