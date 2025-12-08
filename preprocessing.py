@@ -285,3 +285,118 @@ def eos_load_and_preprocess(
     print("rho_scaled:", rho_scaled)
 
     return rho_scaled.reshape(-1, 1), M_scaled, R_scaled, dM, dR
+
+def eos_realistic_load_and_preprocess(
+    mr_csv: str,
+    eos_csv: str,
+    Np: int = 32,
+    Nsamples: int = 500,
+    device=None
+):
+    observed_mr = pd.read_csv(mr_csv)
+    observed_eos = pd.read_csv(eos_csv)
+
+    # ---------------- global scaling constants (must match TOV training) ----------------
+    # These should be computed the same way as in tov_load_and_preprocess: ID != 19248
+    M_MAX = observed_mr.query("ID != 19248")["M"].max()
+    R_MAX = 16.0
+    R_MIN = observed_mr.query("ID != 19248")["R"].min()
+
+    # ---------------- M–R for the "observed" curve (ID 19248, RMFNL) ----------------
+    mr_19248 = observed_mr.query("ID == 19248").query("model == 'RMFNL'")
+
+    # assume rows are ordered along the physical sequence (central density)
+    M_values = mr_19248["M"].values.astype(np.float32)
+    R_values = mr_19248["R"].values.astype(np.float32)
+
+    # --------- find R(M = 1) on the *stable* branch ---------
+    # stable branch: from start up to maximum mass
+    imax = np.argmax(M_values)                 # index of M_max
+    M_stable = M_values[:imax + 1]
+    R_stable = R_values[:imax + 1]
+
+    # interpolate R at M = 1 on the stable branch (this is your R_max_phys)
+    R_at_M1 = np.interp(1.0, M_stable, R_stable)
+
+    # --------- restrict to region with M >= 1.0 (stable + unstable if present) ---------
+    mask_M_ge_1 = M_values >= 1.0
+    M_ge1 = M_values[mask_M_ge_1]
+    R_ge1 = R_values[mask_M_ge_1]
+
+    # smallest radius that still has M >= 1.0
+    R_min_phys = R_ge1.min()
+
+    # we'll interpolate M as a function of R, so sort this subset by R
+    order_R = np.argsort(R_ge1)                # ascending R
+    R_ge1_sorted = R_ge1[order_R]
+    M_ge1_sorted = M_ge1[order_R]
+
+    # --------- choose 11 radii between R(M=1) and R_min_phys ---------
+    R_targets = np.linspace(
+        R_at_M1,       # "R_max" = radius at M = 1
+        R_min_phys,    # "R_min" = most compact star with M >= 1
+        11,
+        dtype=np.float32
+    )
+
+    # interpolate M(R) along this monotonic R-sorted branch
+    M_targets = np.interp(R_targets, R_ge1_sorted, M_ge1_sorted)
+
+    # these are your 11 "true" observed points
+    R_obs = R_targets
+
+    # ---------------- scale to match TOV outputs ----------------
+    M_scaled = M_targets / M_MAX                    # shape (11,)
+    R_scaled = (R_obs - R_MIN) / (R_MAX - R_MIN)    # shape (11,)
+
+    # 10% relative uncertainties on the *true* values
+    sigma_M = 0.1 * M_scaled                        # shape (11,)
+    sigma_R = 0.1 * R_scaled                        # shape (11,)
+
+    # ---------------- sample noisy M-R curves ----------------
+    # Each has shape (11,), overall (Nsamples, 11)
+    M_samples = np.random.normal(
+        loc=M_scaled,
+        scale=sigma_M,
+        size=(Nsamples, M_scaled.shape[0])
+    ).astype(np.float32)
+
+    R_samples = np.random.normal(
+        loc=R_scaled,
+        scale=sigma_R,
+        size=(Nsamples, R_scaled.shape[0])
+    ).astype(np.float32)
+
+    # Uncertainties for each sample (same σ for all samples, based on true values)
+    dM_samples = np.broadcast_to(sigma_M, M_samples.shape).astype(np.float32)
+    dR_samples = np.broadcast_to(sigma_R, R_samples.shape).astype(np.float32)
+
+    # ---------------- ρ-grid from observed EoS ----------------
+    eos_19248 = (
+        observed_eos
+        .query("ID == 19248")
+        .query("model == 'RMFNL'")
+        .sort_values("rho")
+    )
+
+    rho_phys = eos_19248["rho"].values.astype(np.float32)
+    rho_min, rho_max = rho_phys.min(), rho_phys.max()
+
+    rho_phys_targets = np.linspace(rho_min, rho_max, Np, dtype=np.float32)
+    rho_scaled = 0.1 * (rho_phys_targets - rho_min) / (rho_max - rho_min)
+
+    # debug prints if you still want them
+    print("M_scaled (true):", M_scaled)
+    print("R_scaled (true):", R_scaled)
+    print("rho_scaled:", rho_scaled)
+    print("M_samples shape:", M_samples.shape)  # (500, 11)
+    print("R_samples shape:", R_samples.shape)  # (500, 11)
+
+    # final return:
+    #   rho_scaled:          (Np, 1)
+    #   M_samples:           (Nsamples, 11)
+    #   R_samples:           (Nsamples, 11)
+    #   dM_samples, dR_samples: same shapes
+    return rho_scaled.reshape(-1, 1), M_samples, R_samples, dM_samples, dR_samples,  M_MAX, R_MIN, R_MAX,
+    
+
