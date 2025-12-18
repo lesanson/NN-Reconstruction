@@ -23,13 +23,13 @@ if torch.cuda.is_available():
 # ---------------------------
 
 class NonNegative(nn.Module):
-    def __init__(self, eps: float = 1e-8):
+    def __init__(self, eps=1e-2):
         super().__init__()
         self.eps = eps
 
     def forward(self, W):
-        return W*W + self.eps
-
+        return (W) ** 2
+    
 # ---------------------------
 # EoS Network (ρ -> p_scaled)
 # ---------------------------
@@ -39,18 +39,18 @@ class EoSNetwork(nn.Module):
         super().__init__()
         self.act = nn.ELU()
 
-        self.conv1 = nn.Conv1d(input_channels, 128, 1)
-        self.conv2 = nn.Conv1d(128, 128, 1)
-        self.conv3 = nn.Conv1d(128, 64, 1)
-        self.conv4 = nn.Conv1d(64, output_channels, 1)
+        self.conv1 = nn.Conv1d(input_channels, 64, 1, padding='same')
+        self.conv2 = nn.Conv1d(64, 64, 1,padding='same')
+        self.conv3 = nn.Conv1d(64, output_channels, 1, padding='same')
 
-        for m in [self.conv1, self.conv2, self.conv3, self.conv4]:
-            # 1) init the *unconstrained* weight
-            nn.init.kaiming_normal_(m.weight, nonlinearity="relu")
-            nn.init.normal_(m.bias, mean=0.0, std=0.05)
+        for m in [self.conv1, self.conv2, self.conv3]:
+            nn.init.zeros_(m.bias)
 
-            # 2) then register the non-negative parametrization
             parametrize.register_parametrization(m, "weight", NonNegative())
+
+            # init RAW parameter (trainable one)
+            u = m.parametrizations.weight.original
+            nn.init.normal_(u, mean=0.0, std=0.05)
 
 
     def forward(self, x):
@@ -59,10 +59,9 @@ class EoSNetwork(nn.Module):
         # lift 1 -> 64 (no residual)
         x = self.act(self.conv1(x))
         x = self.act(self.conv2(x))
-        x = self.act(self.conv3(x))
 
         # projection
-        x = torch.sigmoid(self.conv4(x))
+        x = torch.sigmoid(self.conv3(x))
         return x.permute(0, 2, 1)
 
 # ---------------------------
@@ -88,21 +87,17 @@ def chi2_loss(M_obs, R_obs, dM, dR):
             total_loss += chi2_term
 
         return total_loss
-    
     return loss
 
+    
 
 def get_lr_schedule(epoch):
-    # Warmup-ish / coarse search
-    if epoch < 200:
-        return 0.5e-3
-    # Still exploring, but smaller
-    elif epoch < 600:
-        return 7e-4
-    # Fine-tuning
-    elif epoch < 1200:
-        return 6e-4
-    # Very fine tuning
+    if epoch < 1000:
+        return 5e-3
+    elif epoch < 2000:
+        return 1e-3
+    elif epoch < 5000:
+        return 8e-4
     else:
         return 5e-4
 
@@ -133,9 +128,7 @@ def train_eos(
     eos_net = EoSNetwork().to(device)
 
     # -------------------- SPLIT DATA --------------------
-    rho_scaled, M_obs, R_obs, dM, dR = eos_load_and_preprocess(
-        mr_csv, eos_csv, Np=Np, device=device
-    )
+    rho_scaled, P_scaled, M_obs, R_obs, dM, dR = eos_load_and_preprocess()
 
     rho_scaled_t = torch.tensor(rho_scaled, dtype=torch.float32, device=device).unsqueeze(0)
     M_obs = torch.tensor(M_obs, dtype=torch.float32, device=device)
@@ -191,7 +184,7 @@ def train_eos_realistic(
     mr_csv: str = "data/sample_mr.csv",
     eos_csv: str = "data/sample_eos.csv",
     save_path: str = "results/eos_realistic.npz",  # now used for predictions
-    epochs: int = 8000,
+    epochs: int = 7100,
     lr: float = 1e-4,
     weight_decay: float = 1e-8,
     Np: int = 32,
@@ -255,8 +248,7 @@ def train_eos_realistic(
         dM_t    = torch.tensor(dM,    dtype=torch.float32, device=device)
         dR_t    = torch.tensor(dR,    dtype=torch.float32, device=device)
 
-        optimizer = torch.optim.AdamW(eos_net.parameters(), lr=lr, weight_decay=weight_decay)
-        criterion = chi2_loss(M_obs_t, R_obs_t, dM_t, dR_t)
+        optimizer = torch.optim.Adam(eos_net.parameters(), lr=lr, weight_decay=weight_decay)
 
         best_loss = float("inf")
         best_state = None
@@ -265,6 +257,9 @@ def train_eos_realistic(
         no_improve_epochs = 0
 
         for epoch in range(epochs):
+            tau0 = 1e-2
+            tau = max(1e-3, tau0 * (0.999 ** epoch))
+            criterion = chi2_loss(M_obs_t, R_obs_t, dM_t, dR_t, tau=tau)
             current_lr = get_lr_schedule(epoch)
             for pg in optimizer.param_groups:
                 pg["lr"] = current_lr
@@ -275,7 +270,7 @@ def train_eos_realistic(
             p_scaled_pred = eos_net(rho_t)      # (1, Np, 1)
             mr_pred = tov(p_scaled_pred)        # (1, Nseq, 2)
 
-            loss = criterion(mr_pred)
+            loss = criterion(mr_pred) 
             loss.backward()
             torch.nn.utils.clip_grad_norm_(eos_net.parameters(), max_norm=1.0)
             optimizer.step()
@@ -378,10 +373,10 @@ if __name__ == "__main__":
     parser.add_argument("--mr_csv", type=str, default="data/sample_mr.csv", help="Observed MR CSV")
     parser.add_argument("--eos_csv", type=str, default="data/sample_eos.csv", help="True EoS CSV for densities")
     parser.add_argument("--save_model", type=str, default="models/eos_solver.pt", help="Where to save EoS network weights / results")
-    parser.add_argument("--epochs", type=int, default=8000)
+    parser.add_argument("--epochs", type=int, default=7100)
     parser.add_argument("--lr", type=float, default=1e-2)
     parser.add_argument("--weight_decay", type=float, default=1e-8)
-    parser.add_argument("--Np", type=int, default=32)
+    parser.add_argument("--Np", type=int, default=64)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--realistic", action="store_true", help="Use realistic noisy MR training")
     args = parser.parse_args()

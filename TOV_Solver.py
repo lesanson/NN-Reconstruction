@@ -39,7 +39,7 @@ class CausalConv1d(nn.Module):
 
 
 class WaveNetTOV(nn.Module):
-    def __init__(self, input_channels=1, output_channels=2, filters=16):
+    def __init__(self, input_channels=1, output_channels=2, filters=64):
         super(WaveNetTOV, self).__init__()
         self.elu = nn.ELU()
         self.sigmoid = nn.Sigmoid()
@@ -47,7 +47,7 @@ class WaveNetTOV(nn.Module):
         self.input_conv = CausalConv1d(input_channels, filters, kernel_size=2, dilation=1)
 
         # Hidden dilated layers
-        dilations = [1, 2, 4, 8, 16, 32, 16, 8, 4, 8, 16, 32, 64]
+        dilations = [1, 2, 4, 8, 16, 32, 16, 32, 64]
         self.hidden_layers = nn.ModuleList([
             CausalConv1d(filters, filters, kernel_size=2, dilation=d)
             for d in dilations
@@ -83,25 +83,27 @@ def r2_score(y_true, y_pred, eps=1e-7):
     return 1 - ss_res / (ss_tot + eps)
 
 # ---- 2. Training function ----
-def train_model(model, X, Y, epochs=3000, batch_size=256, lr=1e-5, save_dir='models'):
+def train_model(model, X, Y, epochs=3000, batch_size=256, lr=1e-4, save_dir='models'):
     os.makedirs(save_dir, exist_ok=True)
     checkpoint_path = os.path.join(save_dir, 'tov_solver.pt')
 
     # -------------------- SPLIT DATA --------------------
     X_train, X_temp, y_train, y_temp = train_test_split(X, Y, test_size=0.2, random_state=42)
-    X_val, X_test, y_val, y_test = train_test_split(X_temp, y_temp, test_size=0.5, random_state=42)
+    X_val, X_test, y_val, y_test = train_test_split(X_temp, y_temp, test_size=0.2
+                                                    , random_state=42)
 
     np.save('data/X_test.npy', X_test)
     np.save('data/y_test.npy', y_test)
 
     # -------------------- CONVERT TO TENSORS --------------------
-    X_train = torch.tensor(X_train, dtype=torch.float32).to(device)
+    X_train = torch.tensor(X_train[:, :, 1:2], dtype=torch.float32).to(device)
     y_train = torch.tensor(y_train, dtype=torch.float32).to(device)
-    X_val = torch.tensor(X_val, dtype=torch.float32).to(device)
+    X_val = torch.tensor(X_val[:, :, 1:2], dtype=torch.float32).to(device)
     y_val = torch.tensor(y_val, dtype=torch.float32).to(device)
 
     print(X_train.shape)
-    print(y_train.shape)
+    print(X_val.shape)
+    print(X_test.shape)
 
     model = model.to(device)
     optimizer = optim.AdamW(model.parameters(), lr=lr, weight_decay=1e-8)
@@ -178,7 +180,7 @@ def evaluate_model(model, X_test, y_test, device=None):
     model.eval()
 
     # Prepare tensors
-    X_test = torch.tensor(X_test, dtype=torch.float32).to(device)
+    X_test = torch.tensor(X_test[:, :, 1:2], dtype=torch.float32).to(device)
     y_test = torch.tensor(y_test, dtype=torch.float32).to(device)
 
     # Evaluation
@@ -199,8 +201,8 @@ if __name__ == "__main__":
     parser.add_argument('--input', type=str, default="data/sample_eos.csv")
     parser.add_argument('--output', type=str, default="data/sample_mr.csv")
     parser.add_argument('--epochs', type=int, default=3000)
-    parser.add_argument('--batch', type=int, default=1024)
-    parser.add_argument('--np', type=int, default=32, dest='Np')
+    parser.add_argument('--batch', type=int, default=512)
+    parser.add_argument('--np', type=int, default=64, dest='Np')
     args = parser.parse_args()
 
     if (
