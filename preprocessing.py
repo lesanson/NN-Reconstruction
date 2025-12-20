@@ -81,41 +81,43 @@ def _resample_group(df: pd.DataFrame, column: str, Np: int = 32) -> pd.DataFrame
     # M–R branch
     # --------------------------------------
     elif column == "M":
-
-        # Extract arrays
         M = df["M"].to_numpy(dtype=float)
         R = df["R"].to_numpy(dtype=float)
 
-        # --- Physical cuts: ONLY on radius ---
-        mask = (R <= 16.0)
+        mask = R <= 16.0
         M = M[mask]
         R = R[mask]
 
-        n_points = len(M)
+        n_points = M.size
         if n_points == 0:
             raise ValueError(f"No valid points for (ID {ID_val}, model {model_val}) after R <= 16 mask.")
 
-        # --- Ensure consistent ordering ---
-        # WARNING: original TOV output may be descending or ascending!
-        # Let's sort by R ascending.
-        # --- Select Np evenly spaced indices (no interpolation) ---
-        idxs = np.linspace(0, n_points - 1, Np).round().astype(int)
-        idxs = np.unique(idxs)  # avoid repeats
+        # Parameter along the ORIGINAL sequence (preserves MR relation)
+        t = np.arange(n_points, dtype=float)
 
-        # If duplicates removed, pad to size Np
-        if len(idxs) < Np:
-            idxs = np.pad(idxs, (0, Np - len(idxs)), mode="edge")
+        if n_points >= Np:
+            # no interpolation needed: take Np indices without repeats
+            idxs = np.round(np.linspace(0, n_points - 1, Np)).astype(int)
+            # (with n_points>=Np this is usually unique; enforce just in case)
+            idxs = np.clip(idxs, 0, n_points - 1)
+            # if duplicates still happen, switch to interpolation instead:
+            if np.unique(idxs).size < Np:
+                t_grid = np.linspace(0, n_points - 1, Np)
+                M_sel = np.interp(t_grid, t, M)
+                R_sel = np.interp(t_grid, t, R)
+            else:
+                M_sel = M[idxs]
+                R_sel = R[idxs]
+        else:
+            # n_points < Np: interpolate LOCALLY along the sequence index
+            t_grid = np.linspace(0, n_points - 1, Np)
+            M_sel = np.interp(t_grid, t, M)
+            R_sel = np.interp(t_grid, t, R)
 
-        # Pick those points
-        R_sel = R[idxs]
-        M_sel = M[idxs]
-
-        # --- Output ---
         out["ID"] = ID_val
         out["model"] = model_val
         out["R"] = R_sel
         out["M"] = M_sel
-
 
 
     else:
@@ -141,9 +143,10 @@ def tov_load_and_preprocess(input_csv: str, output_csv: str, Np: int = 32, seed:
     input_df = pd.read_csv(input_csv).query("model == 'RMFNL'")
     output_df = pd.read_csv(output_csv).query("model == 'RMFNL'")
 
+
     # --- Identify unique (ID, model) pairs in input ---
     input_pairs = input_df[["ID", "model"]].drop_duplicates()
-    sample_pairs = input_pairs #.sample(n=input_pairs.size, random_state=seed)
+    sample_pairs = input_pairs 
 
     # --- Filter both datasets ---
     input_df = input_df.merge(sample_pairs, on=["ID", "model"])
@@ -154,6 +157,7 @@ def tov_load_and_preprocess(input_csv: str, output_csv: str, Np: int = 32, seed:
         input_df[["ID", "model"]].drop_duplicates()
         .merge(output_df[["ID", "model"]].drop_duplicates(), on=["ID", "model"])
     )
+
     input_df = input_df.merge(common_ids, on=["ID", "model"])
     output_df = output_df.merge(common_ids, on=["ID", "model"])
 

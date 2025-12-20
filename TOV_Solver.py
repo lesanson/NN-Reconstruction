@@ -83,7 +83,7 @@ def r2_score(y_true, y_pred, eps=1e-7):
     return 1 - ss_res / (ss_tot + eps)
 
 # ---- 2. Training function ----
-def train_model(model, X, Y, epochs=3000, batch_size=256, lr=1e-4, save_dir='models'):
+def train_model(model, X, Y, epochs=3000, batch_size=256, lr=3e-4, save_dir='models'):
     os.makedirs(save_dir, exist_ok=True)
     checkpoint_path = os.path.join(save_dir, 'tov_solver.pt')
 
@@ -201,7 +201,7 @@ if __name__ == "__main__":
     parser.add_argument('--input', type=str, default="data/sample_eos.csv")
     parser.add_argument('--output', type=str, default="data/sample_mr.csv")
     parser.add_argument('--epochs', type=int, default=3000)
-    parser.add_argument('--batch', type=int, default=512)
+    parser.add_argument('--batch', type=int, default=256)
     parser.add_argument('--np', type=int, default=64, dest='Np')
     args = parser.parse_args()
 
