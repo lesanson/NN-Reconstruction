@@ -93,14 +93,16 @@ def chi2_loss(M_obs, R_obs, dM, dR):
 def get_lr_schedule(epoch):
     if epoch < 2500:
         return 4e-3
-    elif epoch < 5000:
+    elif epoch < 3000:
         return 2e-3
-    elif epoch < 7100:
+    elif epoch < 4500:
         return 1e-3
-    elif epoch < 9000:
+    elif epoch < 5000:
         return 3e-3
+    elif epoch < 7000:
+        return 2e-3
     else:
-        return 1e-3
+        return 3e-3
 
 
 # ---- 2. Training function ----
@@ -374,7 +376,7 @@ if __name__ == "__main__":
     parser.add_argument("--mr_csv", type=str, default="data/sample_mr.csv", help="Observed MR CSV")
     parser.add_argument("--eos_csv", type=str, default="data/sample_eos.csv", help="True EoS CSV for densities")
     parser.add_argument("--save_model", type=str, default="models/eos_solver.pt", help="Where to save EoS network weights / results")
-    parser.add_argument("--epochs", type=int, default=12000)
+    parser.add_argument("--epochs", type=int, default=7100)
     parser.add_argument("--lr", type=float, default=1e-2)
     parser.add_argument("--weight_decay", type=float, default=1e-8)
     parser.add_argument("--Np", type=int, default=64)
