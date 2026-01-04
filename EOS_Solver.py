@@ -28,7 +28,7 @@ class NonNegative(nn.Module):
         self.eps = eps
 
     def forward(self, W):
-        return F.softplus(W) + self.eps
+        return F.leaky_relu(W)
     
 # ---------------------------
 # EoS Network (ρ -> p_scaled)
@@ -39,17 +39,17 @@ class EoSNetwork(nn.Module):
         super().__init__()
         self.act = nn.ELU()
 
-        self.conv1 = nn.Conv1d(input_channels, 128, 1, padding='same')
-        self.conv2 = nn.Conv1d(128, 128, 1,padding='same')
-        self.conv3 = nn.Conv1d(128, output_channels, 1, padding='same')
+        self.conv1 = nn.Conv1d(input_channels, 64, 1, padding='same')
+        self.conv2 = nn.Conv1d(64, 64, 1,padding='same')
+        self.conv3 = nn.Conv1d(64, output_channels, 1, padding='same')
 
         for m in [self.conv1, self.conv2, self.conv3]:
             nn.init.zeros_(m.bias)
 
-            #parametrize.register_parametrization(m, "weight", NonNegative())
-
             nn.init.kaiming_normal_(m.weight, nonlinearity="relu")
             nn.init.normal_(m.bias, mean=0.0, std=0.05)
+
+            parametrize.register_parametrization(m, "weight", NonNegative())
 
 
     def forward(self, x):
@@ -60,7 +60,7 @@ class EoSNetwork(nn.Module):
         x = self.act(self.conv2(x))
 
         # projection
-        x = torch.sigmoid(self.conv3(x))
+        x = self.conv3(x)
         return x.permute(0, 2, 1)
 
 # ---------------------------
@@ -91,14 +91,10 @@ def chi2_loss(M_obs, R_obs, dM, dR):
     
 
 def get_lr_schedule(epoch):
-    if epoch < 2500:
-        return 4e-3
-    elif epoch < 3000:
-        return 2e-3
-    elif epoch < 4500:
-        return 1e-3
-    elif epoch < 5000:
-        return 3e-3
+    if epoch < 1000:
+        return 8e-3
+    if epoch < 5000:
+        return 5e-3
     elif epoch < 7000:
         return 2e-3
     else:

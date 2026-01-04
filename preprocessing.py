@@ -146,7 +146,7 @@ def tov_load_and_preprocess(input_csv: str, output_csv: str, Np: int = 32, seed:
 
     # --- Identify unique (ID, model) pairs in input ---
     input_pairs = input_df[["ID", "model"]].drop_duplicates()
-    sample_pairs = input_pairs 
+    sample_pairs = input_pairs
 
     # --- Filter both datasets ---
     input_df = input_df.merge(sample_pairs, on=["ID", "model"])
