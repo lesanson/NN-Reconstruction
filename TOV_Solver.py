@@ -24,30 +24,41 @@ class CausalConv1d(nn.Module):
     def __init__(self, in_channels, out_channels, kernel_size, dilation=1, bias=True):
         super().__init__()
         self.pad = (kernel_size - 1) * dilation
-        self.conv = nn.Conv1d(
-            in_channels,
-            out_channels,
-            kernel_size,
-            dilation=dilation,
-            bias=bias
+
+        # unconstrained parameters
+        self.weight_raw = nn.Parameter(
+            torch.empty(out_channels, in_channels, kernel_size)
         )
+        self.bias = nn.Parameter(torch.zeros(out_channels)) if bias else None
+        self.dilation = dilation
+
+        nn.init.xavier_uniform_(self.weight_raw)
 
     def forward(self, x):
-        # Pad to keep causality
         x = F.pad(x, (self.pad, 0))
-        return self.conv(x)
+
+        # enforce non-negativity
+        weight = F.leaky_relu(self.weight_raw)
+
+        return F.conv1d(
+            x,
+            weight,
+            bias=self.bias,
+            dilation=self.dilation
+        )
 
 
 class WaveNetTOV(nn.Module):
-    def __init__(self, input_channels=1, output_channels=2, filters=16):
-        super(WaveNetTOV, self).__init__()
+    def __init__(self, input_channels=1, output_channels=2, filters=32):
+        super().__init__()
         self.elu = nn.ELU()
         self.sigmoid = nn.Sigmoid()
+
         # First layer
         self.input_conv = CausalConv1d(input_channels, filters, kernel_size=2, dilation=1)
 
         # Hidden dilated layers
-        dilations = [1, 2, 4, 8, 16, 32, 16, 8, 4, 8, 16, 32, 64]
+        dilations = [1, 2, 4, 8, 16, 32, 16, 8, 16, 32, 64]
         self.hidden_layers = nn.ModuleList([
             CausalConv1d(filters, filters, kernel_size=2, dilation=d)
             for d in dilations
@@ -56,26 +67,15 @@ class WaveNetTOV(nn.Module):
         # Output layer
         self.output_conv = CausalConv1d(filters, output_channels, kernel_size=2, dilation=128)
 
-        self._init_weights()
-
-    def _init_weights(self):
-        for m in self.modules():
-            if isinstance(m, CausalConv1d):
-                nn.init.xavier_uniform_(m.conv.weight)
-                if m.conv.bias is not None:
-                    m.conv.bias.data.zero_()
-
     def forward(self, x):
-        # x: (batch, seq_len, channels) → (batch, channels, seq_len)
-        x = x.permute(0, 2, 1)
+        x = x.permute(0, 2, 1)  # (B, T, C) -> (B, C, T)
+
         x = self.elu(self.input_conv(x))
-        for conv in self.hidden_layers: 
-            residual = x 
-            out = self.elu(conv(x)) 
-            x = residual + out
+        for conv in self.hidden_layers:
+            x =  self.elu(conv(x))
+
         x = self.sigmoid(self.output_conv(x))
-        # back to (batch, seq_len, channels)
-        return x.permute(0, 2, 1)
+        return x.permute(0, 2, 1)  # (B, C, T) -> (B, T, C)
 
 def r2_score(y_true, y_pred, eps=1e-7):
     ss_res = ((y_true - y_pred) ** 2).sum()
@@ -83,25 +83,27 @@ def r2_score(y_true, y_pred, eps=1e-7):
     return 1 - ss_res / (ss_tot + eps)
 
 # ---- 2. Training function ----
-def train_model(model, X, Y, epochs=3000, batch_size=256, lr=1e-5, save_dir='models'):
+def train_model(model, X, Y, epochs=3000, batch_size=256, lr=3e-4, save_dir='models'):
     os.makedirs(save_dir, exist_ok=True)
     checkpoint_path = os.path.join(save_dir, 'tov_solver.pt')
 
     # -------------------- SPLIT DATA --------------------
     X_train, X_temp, y_train, y_temp = train_test_split(X, Y, test_size=0.2, random_state=42)
-    X_val, X_test, y_val, y_test = train_test_split(X_temp, y_temp, test_size=0.5, random_state=42)
+    X_val, X_test, y_val, y_test = train_test_split(X_temp, y_temp, test_size=0.2
+                                                    , random_state=42)
 
     np.save('data/X_test.npy', X_test)
     np.save('data/y_test.npy', y_test)
 
     # -------------------- CONVERT TO TENSORS --------------------
-    X_train = torch.tensor(X_train, dtype=torch.float32).to(device)
+    X_train = torch.tensor(X_train[:, :, 1:2], dtype=torch.float32).to(device)
     y_train = torch.tensor(y_train, dtype=torch.float32).to(device)
-    X_val = torch.tensor(X_val, dtype=torch.float32).to(device)
+    X_val = torch.tensor(X_val[:, :, 1:2], dtype=torch.float32).to(device)
     y_val = torch.tensor(y_val, dtype=torch.float32).to(device)
 
     print(X_train.shape)
-    print(y_train.shape)
+    print(X_val.shape)
+    print(X_test.shape)
 
     model = model.to(device)
     optimizer = optim.AdamW(model.parameters(), lr=lr, weight_decay=1e-8)
@@ -178,7 +180,7 @@ def evaluate_model(model, X_test, y_test, device=None):
     model.eval()
 
     # Prepare tensors
-    X_test = torch.tensor(X_test, dtype=torch.float32).to(device)
+    X_test = torch.tensor(X_test[:, :, 1:2], dtype=torch.float32).to(device)
     y_test = torch.tensor(y_test, dtype=torch.float32).to(device)
 
     # Evaluation
@@ -200,7 +202,7 @@ if __name__ == "__main__":
     parser.add_argument('--output', type=str, default="data/sample_mr.csv")
     parser.add_argument('--epochs', type=int, default=3000)
     parser.add_argument('--batch', type=int, default=1024)
-    parser.add_argument('--np', type=int, default=32, dest='Np')
+    parser.add_argument('--np', type=int, default=64, dest='Np')
     args = parser.parse_args()
 
     if (
