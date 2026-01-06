@@ -32,13 +32,13 @@ class CausalConv1d(nn.Module):
         self.bias = nn.Parameter(torch.zeros(out_channels)) if bias else None
         self.dilation = dilation
 
-        nn.init.xavier_uniform_(self.weight_raw)
+        nn.init.normal_(self.weight_raw, mean=0.0, std=0.2)
 
     def forward(self, x):
         x = F.pad(x, (self.pad, 0))
 
-        # enforce non-negativity
-        weight = F.leaky_relu(self.weight_raw)
+        
+        weight = F.relu(self.weight_raw) # ensure positivity
 
         return F.conv1d(
             x,
@@ -58,14 +58,14 @@ class WaveNetTOV(nn.Module):
         self.input_conv = CausalConv1d(input_channels, filters, kernel_size=2, dilation=1)
 
         # Hidden dilated layers
-        dilations = [1, 2, 4, 8, 16, 32, 16, 8, 16, 32, 64]
+        dilations = [1, 2, 4, 8, 16, 32, 16, 32]
         self.hidden_layers = nn.ModuleList([
             CausalConv1d(filters, filters, kernel_size=2, dilation=d)
             for d in dilations
         ])
 
         # Output layer
-        self.output_conv = CausalConv1d(filters, output_channels, kernel_size=2, dilation=128)
+        self.output_conv = CausalConv1d(filters, output_channels, kernel_size=2, dilation=64)
 
     def forward(self, x):
         x = x.permute(0, 2, 1)  # (B, T, C) -> (B, C, T)
@@ -111,7 +111,7 @@ def train_model(model, X, Y, epochs=3000, batch_size=256, lr=3e-4, save_dir='mod
 
     start_time = time.time()
     criterion = nn.MSELoss()
-    # -------------------- TRAINING LOOP --------------------
+    # -------------------- TRAINING LOOP -------------------
     for epoch in range(epochs):
         model.train()
         perm = torch.randperm(X_train.size(0))  # shuffle each epoch
