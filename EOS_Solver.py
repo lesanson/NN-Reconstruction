@@ -93,12 +93,14 @@ def chi2_loss(M_obs, R_obs, dM, dR):
 def get_lr_schedule(epoch):
     if epoch < 1000:
         return 8e-3
-    if epoch < 5000:
+    if epoch < 2000:
         return 5e-3
-    elif epoch < 7000:
+    elif epoch < 3000:
         return 2e-3
+    elif epoch < 5000:
+        return 1e-3
     else:
-        return 3e-3
+        return 1e-2
 
 
 # ---- 2. Training function ----

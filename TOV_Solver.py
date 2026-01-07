@@ -38,7 +38,7 @@ class CausalConv1d(nn.Module):
         x = F.pad(x, (self.pad, 0))
 
         
-        weight = F.relu(self.weight_raw) # ensure positivity
+        weight = self.weight_raw**2 # ensure positivity
 
         return F.conv1d(
             x,
@@ -49,23 +49,23 @@ class CausalConv1d(nn.Module):
 
 
 class WaveNetTOV(nn.Module):
-    def __init__(self, input_channels=1, output_channels=2, filters=32):
+    def __init__(self, input_channels=1, output_channels=2, resolution=64):
         super().__init__()
         self.elu = nn.ELU()
         self.sigmoid = nn.Sigmoid()
 
         # First layer
-        self.input_conv = CausalConv1d(input_channels, filters, kernel_size=2, dilation=1)
+        self.input_conv = CausalConv1d(input_channels, resolution, kernel_size=2, dilation=1)
 
         # Hidden dilated layers
         dilations = [1, 2, 4, 8, 16, 32, 16, 32]
         self.hidden_layers = nn.ModuleList([
-            CausalConv1d(filters, filters, kernel_size=2, dilation=d)
+            CausalConv1d(resolution, resolution, kernel_size=2, dilation=d)
             for d in dilations
         ])
 
         # Output layer
-        self.output_conv = CausalConv1d(filters, output_channels, kernel_size=2, dilation=64)
+        self.output_conv = CausalConv1d(resolution, output_channels, kernel_size=2, dilation=64)
 
     def forward(self, x):
         x = x.permute(0, 2, 1)  # (B, T, C) -> (B, C, T)

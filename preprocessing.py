@@ -143,6 +143,13 @@ def tov_load_and_preprocess(input_csv: str, output_csv: str, Np: int = 32, seed:
     input_df = pd.read_csv(input_csv).query("model == 'RMFNL'")
     output_df = pd.read_csv(output_csv).query("model == 'RMFNL'")
 
+    # --- Scaling Constants ---
+    M_MAX = output_df["M"].max()
+    np.save("scalers/M_MAX.npy", M_MAX)
+    R_MAX = 16.0
+    R_MIN = output_df["R"].min()
+    np.save("scalers/R_MIN.npy", R_MIN)
+
 
     # --- Identify unique (ID, model) pairs in input ---
     input_pairs = input_df[["ID", "model"]].drop_duplicates()
@@ -178,11 +185,6 @@ def tov_load_and_preprocess(input_csv: str, output_csv: str, Np: int = 32, seed:
 
     X = np.zeros((N, Np, 2), dtype=np.float32)
     Y_Scaled = np.zeros((N, Np, 2), dtype=np.float32)
-
-    # --- GLOBAL SCALING CONSTANTS ---
-    M_MAX = output_df["M"].max()
-    R_MAX = 16.0
-    R_MIN = output_df["R"].min()
 
     # --- Build dataset ---
     for i, (ID, model) in enumerate(unique_pairs):
@@ -232,11 +234,10 @@ def tov_load_and_preprocess(input_csv: str, output_csv: str, Np: int = 32, seed:
 
 def eos_load_and_preprocess():
     # ---------------- load ----------------
-    X_scaled = np.load("data/X_scaled.npy")   # shape (N, Np, 2)
-    Y_scaled = np.load("data/Y_scaled.npy")   # shape (N, Np, 2)
+    X_scaled = np.load("data/X_test.npy")   # shape (N, Np, 2)
+    Y_scaled = np.load("data/Y_test.npy")   # shape (N, Np, 2)
 
-    # Mass scaling constant (must match what you used to scale Y during preprocessing)
-    M_MAX = float(pd.read_csv("data/sample_mr.csv").query("model == 'RMFNL'")["M"].max())
+    M_MAX = np.load("scalers/M_MAX.npy")
 
     # Use sample 0 (you are doing inference for one EOS here)
     M_scaled_full = Y_scaled[0, :, 0].astype(np.float32)   # (Np,)
