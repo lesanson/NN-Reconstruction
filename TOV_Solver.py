@@ -32,13 +32,13 @@ class CausalConv1d(nn.Module):
         self.bias = nn.Parameter(torch.zeros(out_channels)) if bias else None
         self.dilation = dilation
 
-        nn.init.xavier_uniform_(self.weight_raw)
+        nn.init.normal_(self.weight_raw, mean=0.0, std=0.2)
 
     def forward(self, x):
         x = F.pad(x, (self.pad, 0))
 
-        # enforce non-negativity
-        weight = F.leaky_relu(self.weight_raw)
+        
+        weight = self.weight_raw**2 # ensure positivity
 
         return F.conv1d(
             x,
@@ -49,23 +49,23 @@ class CausalConv1d(nn.Module):
 
 
 class WaveNetTOV(nn.Module):
-    def __init__(self, input_channels=1, output_channels=2, filters=32):
+    def __init__(self, input_channels=1, output_channels=2, resolution=64):
         super().__init__()
         self.elu = nn.ELU()
         self.sigmoid = nn.Sigmoid()
 
         # First layer
-        self.input_conv = CausalConv1d(input_channels, filters, kernel_size=2, dilation=1)
+        self.input_conv = CausalConv1d(input_channels, resolution, kernel_size=2, dilation=1)
 
         # Hidden dilated layers
-        dilations = [1, 2, 4, 8, 16, 32, 16, 8, 16, 32, 64]
+        dilations = [1, 2, 4, 8, 16, 32, 16, 32]
         self.hidden_layers = nn.ModuleList([
-            CausalConv1d(filters, filters, kernel_size=2, dilation=d)
+            CausalConv1d(resolution, resolution, kernel_size=2, dilation=d)
             for d in dilations
         ])
 
         # Output layer
-        self.output_conv = CausalConv1d(filters, output_channels, kernel_size=2, dilation=128)
+        self.output_conv = CausalConv1d(resolution, output_channels, kernel_size=2, dilation=64)
 
     def forward(self, x):
         x = x.permute(0, 2, 1)  # (B, T, C) -> (B, C, T)
@@ -111,7 +111,7 @@ def train_model(model, X, Y, epochs=3000, batch_size=256, lr=3e-4, save_dir='mod
 
     start_time = time.time()
     criterion = nn.MSELoss()
-    # -------------------- TRAINING LOOP --------------------
+    # -------------------- TRAINING LOOP -------------------
     for epoch in range(epochs):
         model.train()
         perm = torch.randperm(X_train.size(0))  # shuffle each epoch
@@ -187,9 +187,14 @@ def evaluate_model(model, X_test, y_test, device=None):
     with torch.no_grad():
         pred = model(X_test)
         mse_loss = nn.MSELoss()(pred, y_test).item()
+        mse_loss_mass = nn.MSELoss()(pred[:,:,0], y_test[:,:,0]).item()
+        mse_loss_radius = nn.MSELoss()(pred[:,:,1], y_test[:,:,1]).item()
         r2 = r2_score(y_test, pred).item()
+        r2_mass = r2_score(y_test[:,:,0], pred[:,:,0]).item()
+        r2_radius = r2_score(y_test[:,:,1], pred[:,:,1]).item()
 
-    metrics = {"MSE": mse_loss, "R2": r2}
+    metrics = {"MSE": mse_loss, "R2": r2, 
+               "MSE_Mass": mse_loss_mass, "R2_Mass": r2_mass, "MSE_Radius": mse_loss_radius, "R2_Radius": r2_radius}
     preds = pred.cpu().numpy()
     return metrics, preds
 
