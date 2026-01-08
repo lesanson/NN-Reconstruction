@@ -187,9 +187,14 @@ def evaluate_model(model, X_test, y_test, device=None):
     with torch.no_grad():
         pred = model(X_test)
         mse_loss = nn.MSELoss()(pred, y_test).item()
+        mse_loss_mass = nn.MSELoss()(pred[:,:,0], y_test[:,:,0]).item()
+        mse_loss_radius = nn.MSELoss()(pred[:,:,1], y_test[:,:,1]).item()
         r2 = r2_score(y_test, pred).item()
+        r2_mass = r2_score(y_test[:,:,0], pred[:,:,0]).item()
+        r2_radius = r2_score(y_test[:,:,1], pred[:,:,1]).item()
 
-    metrics = {"MSE": mse_loss, "R2": r2}
+    metrics = {"MSE": mse_loss, "R2": r2, 
+               "MSE_Mass": mse_loss_mass, "R2_Mass": r2_mass, "MSE_Radius": mse_loss_radius, "R2_Radius": r2_radius}
     preds = pred.cpu().numpy()
     return metrics, preds
 
