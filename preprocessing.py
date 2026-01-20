@@ -140,8 +140,8 @@ def tov_load_and_preprocess(input_csv: str, output_csv: str, Np: int = 32, seed:
     """
 
     # --- Load and filter data ---
-    input_df = pd.read_csv(input_csv).query("model == 'RMFNL'")
-    output_df = pd.read_csv(output_csv).query("model == 'RMFNL'")
+    input_df = pd.read_csv(input_csv)
+    output_df = pd.read_csv(output_csv)
 
     # --- Scaling Constants ---
     M_MAX = output_df["M"].max()
