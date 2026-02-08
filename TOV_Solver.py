@@ -36,10 +36,7 @@ class CausalConv1d(nn.Module):
 
     def forward(self, x):
         x = F.pad(x, (self.pad, 0))
-
-        
         weight = self.weight_raw**2 # ensure positivity
-
         return F.conv1d(
             x,
             weight,
@@ -89,7 +86,7 @@ def train_model(model, X, Y, epochs=3000, batch_size=256, lr=3e-4, save_dir='mod
 
     # -------------------- SPLIT DATA --------------------
     X_train, X_temp, y_train, y_temp = train_test_split(X, Y, test_size=0.2, random_state=42)
-    X_val, X_test, y_val, y_test = train_test_split(X_temp, y_temp, test_size=0.2
+    X_val, X_test, y_val, y_test = train_test_split(X_temp, y_temp, test_size=0.05
                                                     , random_state=42)
 
     np.save('data/X_test.npy', X_test)

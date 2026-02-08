@@ -1,4 +1,9 @@
 /venv
+/nvenv
 /__pycache__
 data/sample_eos.csv
 data/sample_mr.csv
+data/Monmoy/eos_cs2.csv
+data/Monmoy/mr_cs2.csv
+data/Monmoy/para_cs2.csv
+data/Monmoy/nlive20000_expf3.3_noCONST_noMM_tol0.1post_equal_weights_j0437.dat
